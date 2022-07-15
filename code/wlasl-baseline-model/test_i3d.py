@@ -16,10 +16,9 @@ import torch.nn.functional as F
 from pytorch_i3d import InceptionI3d
 
 # from nslt_dataset_all import NSLT as Dataset
-#from datasets.nslt_dataset_all import NSLT as Dataset
+# from datasets.nslt_dataset_all import NSLT as Dataset
 from datasets.nslt_dataset import NSLT as Dataset
 import cv2
-
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
@@ -65,7 +64,7 @@ def run(mode='rgb',
         val_dataset = Dataset(train_split, 'test', root, mode, test_transforms)
     else:
         val_dataset = datasets['test']
-    
+
     ## Change num_workers=0 - Docker bug        
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=1,
                                                  shuffle=False, num_workers=0,
@@ -80,10 +79,12 @@ def run(mode='rgb',
     else:
         i3d = InceptionI3d(400, in_channels=3)
         i3d.load_state_dict(torch.load('weights/rgb_imagenet.pt'))
-        
+
     i3d.replace_logits(num_classes)
-    i3d.load_state_dict(torch.load(weights))  # nslt_2000_000700.pt nslt_1000_010800 nslt_300_005100.pt(best_results)  nslt_300_005500.pt(results_reported) nslt_2000_011400
-    i3d.cuda()
+    i3d.load_state_dict(torch.load(
+        weights, map_location=torch.device(
+            'cpu')))  # nslt_2000_000700.pt nslt_1000_010800 nslt_300_005100.pt(best_results)  nslt_300_005500.pt(results_reported) nslt_2000_011400
+    # i3d.cuda()
     i3d = nn.DataParallel(i3d)
     i3d.eval()
 
@@ -102,10 +103,13 @@ def run(mode='rgb',
     top10_tp = np.zeros(num_classes, dtype=np.float)
 
     for c, data in enumerate(dataloaders["test"], 1):
+        if c == 2:
+            # check if test passes for two videos
+            break
         inputs, labels, video_id = data  # inputs: b, c, t, h, w
 
-        per_frame_logits = i3d(inputs) # 1 x num_classes x num_frames
-        
+        per_frame_logits = i3d(inputs)  # 1 x num_classes x num_frames
+
         ## 1 x num_classes
         predictions = torch.max(per_frame_logits, dim=2)[0]
         # predictions[0] --> num_classes tensor
@@ -129,26 +133,27 @@ def run(mode='rgb',
             top1_tp[lbl] += 1
         else:
             top1_fp[lbl] += 1
-        print(str(c) + ' / ' + str(len(dataloaders['test'])), video_id[0], float(correct) / len(dataloaders["test"]), float(correct_5) / len(dataloaders["test"]),
+        print(str(c) + ' / ' + str(len(dataloaders['test'])), video_id[0], float(correct) / len(dataloaders["test"]),
+              float(correct_5) / len(dataloaders["test"]),
               float(correct_10) / len(dataloaders["test"]))
 
         # per-class accuracy
     # if sum(top1_tp+top1_fp) == 0:
     #     print('sum is zeo')
-    
+
     # Fix divide by zero error
     sum1 = top1_tp + top1_fp
     sum5 = top5_tp + top5_fp
     sum10 = top10_tp + top10_fp
 
     sum1[sum1 == 0] = 1e-10
-    #top1_tp[sum1 == 0] = 0
+    # top1_tp[sum1 == 0] = 0
 
     sum5[sum5 == 0] = 1e-10
-    #top5_tp[sum5 == 0] = 0
+    # top5_tp[sum5 == 0] = 0
 
     sum10[sum10 == 0] = 1e-10
-    #top10_tp[sum10 == 0] = 0      
+    # top10_tp[sum10 == 0] = 0
 
     top1_per_class = np.mean(top1_tp / sum1)
     top5_per_class = np.mean(top5_tp / sum5)
@@ -177,7 +182,8 @@ def ensemble(mode, root, train_split, weights, num_classes):
         i3d = InceptionI3d(400, in_channels=3)
         i3d.load_state_dict(torch.load('weights/rgb_imagenet.pt'))
     i3d.replace_logits(num_classes)
-    i3d.load_state_dict(torch.load(weights))  # nslt_2000_000700.pt nslt_1000_010800 nslt_300_005100.pt(best_results)  nslt_300_005500.pt(results_reported) nslt_2000_011400
+    i3d.load_state_dict(torch.load(
+        weights))  # nslt_2000_000700.pt nslt_1000_010800 nslt_300_005100.pt(best_results)  nslt_300_005500.pt(results_reported) nslt_2000_011400
     i3d.cuda()
     i3d = nn.DataParallel(i3d)
     i3d.eval()
@@ -206,7 +212,7 @@ def ensemble(mode, root, train_split, weights, num_classes):
 
             segments = []
             for k in range(num_segments):
-                segments.append(inputs[:, :, k*num: (k+1)*num, :, :])
+                segments.append(inputs[:, :, k * num: (k + 1) * num, :, :])
 
             segments = torch.cat(segments, dim=0)
             per_frame_logits = i3d(segments)
@@ -251,7 +257,8 @@ def run_on_tensor(weights, ip_tensor, num_classes):
     # i3d.load_state_dict(torch.load('models/rgb_imagenet.pt'))
 
     i3d.replace_logits(num_classes)
-    i3d.load_state_dict(torch.load(weights))  # nslt_2000_000700.pt nslt_1000_010800 nslt_300_005100.pt(best_results)  nslt_300_005500.pt(results_reported) nslt_2000_011400
+    i3d.load_state_dict(torch.load(
+        weights))  # nslt_2000_000700.pt nslt_1000_010800 nslt_300_005100.pt(best_results)  nslt_300_005500.pt(results_reported) nslt_2000_011400
     i3d.cuda()
     i3d = nn.DataParallel(i3d)
     i3d.eval()
@@ -265,7 +272,7 @@ def run_on_tensor(weights, ip_tensor, num_classes):
     predictions = predictions.transpose(2, 1)
     out_labels = np.argsort(predictions.cpu().detach().numpy()[0])
 
-    arr = predictions.cpu().detach().numpy()[0,:,0].T
+    arr = predictions.cpu().detach().numpy()[0, :, 0].T
 
     plt.plot(range(len(arr)), F.softmax(torch.from_numpy(arr), dim=0).numpy())
     plt.show()
@@ -293,11 +300,11 @@ if __name__ == '__main__':
 
     mode = 'rgb'
     num_classes = 2000
-    
+
     ## Change to where the videos are located
-    root = {'word':'videos'}
+    root = {'word': 'videos'}
 
     train_split = 'preprocess/nslt_2000.json'
     weights = '/home/jovyan/work/WLASL_complete/checkpoints/nslt_2000_065846_0.447803.pt'
 
-    run(mode=mode, root=root, train_split=train_split, weights=weights, datasets =datasets)
+    run(mode=mode, root=root, train_split=train_split, weights=weights, datasets=datasets)
